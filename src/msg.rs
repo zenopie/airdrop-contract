@@ -7,6 +7,7 @@ use crate::state::Config;
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstantiateMsg {
     pub owner: String,
+    pub backend_wallet: String,
     pub erth_token_contract: String,
     pub erth_token_hash: String,
     pub allocation_contract: String,
@@ -84,14 +85,6 @@ pub struct HasClaimedResponse {
     pub amount: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ConfigResponse {
-    pub owner: String,
-    pub erth_token_contract: String,
-    pub erth_token_hash: String,
-    pub allocation_contract: String,
-    pub allocation_hash: String,
-}
 
 /// Migration message
 #[derive(Serialize, Deserialize, JsonSchema)]

@@ -6,6 +6,7 @@ use cosmwasm_std::{Addr, Uint128};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: Addr,
+    pub backend_wallet: Addr,
     pub erth_token_contract: Addr,
     pub erth_token_hash: String,
     pub allocation_contract: Addr,

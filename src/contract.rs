@@ -5,7 +5,7 @@ use cosmwasm_std::{
 use secret_toolkit::snip20;
 use sha2::{Digest, Sha256};
 use crate::msg::{
-    ConfigResponse, CurrentRoundResponse, ExecuteMsg, HasClaimedResponse,
+    CurrentRoundResponse, ExecuteMsg, HasClaimedResponse,
     InstantiateMsg, QueryMsg, ReceiveMsg, SendMsg,
 };
 use crate::state::{AirdropRound, Config, State, CLAIMS, CONFIG, STATE, CURRENT_ROUND};
@@ -60,11 +60,13 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
     let owner = deps.api.addr_validate(&msg.owner)?;
+    let backend_wallet = deps.api.addr_validate(&msg.backend_wallet)?;
     let erth_token_contract = deps.api.addr_validate(&msg.erth_token_contract)?;
     let allocation_contract = deps.api.addr_validate(&msg.allocation_contract)?;
 
     let config = Config {
         owner,
+        backend_wallet,
         erth_token_contract,
         erth_token_hash: msg.erth_token_hash.clone(),
         allocation_contract,
@@ -235,9 +237,9 @@ fn execute_reset_airdrop(
 ) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
 
-    // Only owner can reset
-    if info.sender != config.owner {
-        return Err(StdError::generic_err("Unauthorized: only owner can reset airdrop"));
+    // Only backend wallet can reset
+    if info.sender != config.backend_wallet {
+        return Err(StdError::generic_err("Unauthorized: only backend wallet can reset airdrop"));
     }
 
     let mut state = STATE.load(deps.storage)?;
@@ -313,13 +315,6 @@ fn query_has_claimed(deps: Deps, address: String) -> StdResult<HasClaimedRespons
     })
 }
 
-fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
-    let config = CONFIG.load(deps.storage)?;
-    Ok(ConfigResponse {
-        owner: config.owner.to_string(),
-        erth_token_contract: config.erth_token_contract.to_string(),
-        erth_token_hash: config.erth_token_hash,
-        allocation_contract: config.allocation_contract.to_string(),
-        allocation_hash: config.allocation_hash,
-    })
+fn query_config(deps: Deps) -> StdResult<Config> {
+    CONFIG.load(deps.storage)
 }
