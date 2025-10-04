@@ -28,13 +28,13 @@ build-mainnet: _build-mainnet compress-wasm
 _build-mainnet:
 	RUSTFLAGS='-C link-arg=-s' cargo build --release --target wasm32-unknown-unknown
 
-# like build-mainnet, but slower and more deterministic
+# use the optimized contract build enviroment
 .PHONY: build-mainnet-reproducible
 build-mainnet-reproducible:
 	docker run --rm -v "$$(pwd)":/contract \
 		--mount type=volume,source="$$(basename "$$(pwd)")_cache",target=/contract/target \
 		--mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-		enigmampc/secret-contract-optimizer:1.0.9
+		?co
 
 .PHONY: compress-wasm
 compress-wasm:

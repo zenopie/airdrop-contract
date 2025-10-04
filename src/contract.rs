@@ -1,14 +1,14 @@
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, QueryResponse,
-    Response, StdError, StdResult, Uint128,
+    entry_point, from_binary, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
+    QueryResponse, Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use secret_toolkit::snip20;
 use sha2::{Digest, Sha256};
 use crate::msg::{
     ConfigResponse, CurrentRoundResponse, ExecuteMsg, HasClaimedResponse,
-    InstantiateMsg, QueryMsg, ReceiveMsg,
+    InstantiateMsg, QueryMsg, ReceiveMsg, SendMsg,
 };
-use crate::state::{claims, AirdropRound, Config, State, CONFIG, STATE, CURRENT_ROUND};
+use crate::state::{AirdropRound, Config, State, CLAIMS, CONFIG, STATE, CURRENT_ROUND};
 
 /// Verify merkle proof using SHA256 and sorted pair hashing
 fn verify_merkle_proof(
@@ -61,11 +61,14 @@ pub fn instantiate(
 ) -> StdResult<Response> {
     let owner = deps.api.addr_validate(&msg.owner)?;
     let erth_token_contract = deps.api.addr_validate(&msg.erth_token_contract)?;
+    let allocation_contract = deps.api.addr_validate(&msg.allocation_contract)?;
 
     let config = Config {
         owner,
         erth_token_contract,
         erth_token_hash: msg.erth_token_hash.clone(),
+        allocation_contract,
+        allocation_hash: msg.allocation_hash.clone(),
     };
     CONFIG.save(deps.storage, &config)?;
 
@@ -89,8 +92,11 @@ pub fn execute(
 ) -> StdResult<Response> {
     match msg {
         ExecuteMsg::Claim { amount, proof } => execute_claim(deps, env, info, amount, proof),
-        ExecuteMsg::ResetAirdrop { merkle_root, total_amount } => {
-            execute_reset_airdrop(deps, env, info, merkle_root, total_amount)
+        ExecuteMsg::ResetAirdrop { merkle_root, total_stake } => {
+            execute_reset_airdrop(deps, env, info, merkle_root, total_stake)
+        }
+        ExecuteMsg::UpdateConfig { config } => {
+            execute_update_config(deps, env, info, config)
         }
         ExecuteMsg::Receive { sender, from, amount, msg, memo: _ } => {
             receive_dispatch(deps, env, info, sender, from, amount, msg)
@@ -149,7 +155,7 @@ fn execute_claim(
         .map_err(|_| StdError::generic_err("No active airdrop round"))?;
 
     // Check if already claimed in this round
-    if claims(round.round_id).get(deps.storage, &info.sender).is_some() {
+    if CLAIMS.get(deps.storage, &(round.round_id, info.sender.clone())).is_some() {
         return Err(StdError::generic_err("Already claimed for this round"));
     }
 
@@ -166,7 +172,7 @@ fn execute_claim(
         .multiply_ratio(stake_amount, round.total_stake);
 
     // Mark as claimed for this round
-    claims(round.round_id).insert(deps.storage, &info.sender, &stake_amount.to_string())?;
+    CLAIMS.insert(deps.storage, &(round.round_id, info.sender.clone()), &stake_amount.to_string())?;
 
     // Update claimed amount
     round.claimed_amount += claim_amount;
@@ -179,16 +185,45 @@ fn execute_claim(
         None,
         None,
         256,
-        config.erth_token_hash,
+        config.erth_token_hash.clone(),
         config.erth_token_contract.to_string(),
     )?;
 
+    // Claim allocation from allocation contract
+    let allocation_claim_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: config.allocation_contract.to_string(),
+        code_hash: config.allocation_hash.clone(),
+        msg: to_binary(&SendMsg::ClaimAllocation {
+            allocation_id: 4,
+        })?,
+        funds: vec![],
+    });
+
     Ok(Response::new()
         .add_message(send_msg)
+        .add_message(allocation_claim_msg)
         .add_attribute("action", "claim")
         .add_attribute("address", info.sender.to_string())
         .add_attribute("claim_amount", claim_amount.to_string())
         .add_attribute("round_id", round.round_id.to_string()))
+}
+
+fn execute_update_config(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    config: Config,
+) -> StdResult<Response> {
+    let old_config = CONFIG.load(deps.storage)?;
+
+    if info.sender != old_config.owner {
+        return Err(StdError::generic_err("Unauthorized"));
+    }
+
+    CONFIG.save(deps.storage, &config)?;
+
+    Ok(Response::new()
+        .add_attribute("action", "update_config"))
 }
 
 fn execute_reset_airdrop(
@@ -235,8 +270,8 @@ fn execute_reset_airdrop(
     state.pending_reward = Uint128::zero();
     STATE.save(deps.storage, &state)?;
 
-    // Old claims remain in separate namespace (claims_{old_round_id})
-    // New round uses claims_{new_round_id}, so all addresses can claim again
+    // Old claims remain with their round_id key
+    // New round uses new round_id, so all addresses can claim again
 
     Ok(Response::new()
         .add_attribute("action", "reset_airdrop")
@@ -270,7 +305,7 @@ fn query_current_round(deps: Deps) -> StdResult<CurrentRoundResponse> {
 fn query_has_claimed(deps: Deps, address: String) -> StdResult<HasClaimedResponse> {
     let addr = deps.api.addr_validate(&address)?;
     let round = CURRENT_ROUND.load(deps.storage)?;
-    let amount = claims(round.round_id).get(deps.storage, &addr);
+    let amount = CLAIMS.get(deps.storage, &(round.round_id, addr));
 
     Ok(HasClaimedResponse {
         has_claimed: amount.is_some(),
@@ -284,5 +319,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         owner: config.owner.to_string(),
         erth_token_contract: config.erth_token_contract.to_string(),
         erth_token_hash: config.erth_token_hash,
+        allocation_contract: config.allocation_contract.to_string(),
+        allocation_hash: config.allocation_hash,
     })
 }

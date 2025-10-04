@@ -8,6 +8,8 @@ pub struct Config {
     pub owner: Addr,
     pub erth_token_contract: Addr,
     pub erth_token_hash: String,
+    pub allocation_contract: Addr,
+    pub allocation_hash: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -31,7 +33,5 @@ pub const CONFIG: Item<Config> = Item::new(b"config");
 pub const STATE: Item<State> = Item::new(b"state");
 pub const CURRENT_ROUND: Item<AirdropRound> = Item::new(b"current_round");
 
-// Get claims map for a specific round
-pub fn claims(round_id: u64) -> Keymap<'static, Addr, String> {
-    Keymap::new(format!("claims_{}", round_id).as_bytes())
-}
+// Claims storage with composite key (round_id, address)
+pub const CLAIMS: Keymap<(u64, Addr), String> = Keymap::new(b"claims");

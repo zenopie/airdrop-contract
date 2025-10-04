@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use cosmwasm_std::{Binary, Uint128};
+use crate::state::Config;
 
 /// Instantiate message
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -8,6 +9,8 @@ pub struct InstantiateMsg {
     pub owner: String,
     pub erth_token_contract: String,
     pub erth_token_hash: String,
+    pub allocation_contract: String,
+    pub allocation_hash: String,
 }
 
 /// Execute messages
@@ -23,6 +26,10 @@ pub enum ExecuteMsg {
     ResetAirdrop {
         merkle_root: String,
         total_stake: Uint128,
+    },
+    /// Update config (owner only)
+    UpdateConfig {
+        config: Config,
     },
     /// SNIP-20 Receive hook
     Receive {
@@ -40,6 +47,13 @@ pub enum ExecuteMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
     AllocationSend { allocation_id: u32 },
+}
+
+/// Messages for allocation contract
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SendMsg {
+    ClaimAllocation { allocation_id: u32 },
 }
 
 /// Query messages
@@ -75,6 +89,8 @@ pub struct ConfigResponse {
     pub owner: String,
     pub erth_token_contract: String,
     pub erth_token_hash: String,
+    pub allocation_contract: String,
+    pub allocation_hash: String,
 }
 
 /// Migration message
