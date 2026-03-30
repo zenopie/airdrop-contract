@@ -1,14 +1,17 @@
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
+    entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
     QueryResponse, Response, StdError, StdResult, Uint128, WasmMsg,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use secret_toolkit::snip20;
+use secret_toolkit::storage::Item;
 use sha2::{Digest, Sha256};
 use crate::msg::{
     CurrentRoundResponse, ExecuteMsg, HasClaimedResponse,
-    InstantiateMsg, QueryMsg, ReceiveMsg, SendMsg,
+    InstantiateMsg, MigrateMsg, QueryMsg, ReceiveMsg, SendMsg,
 };
-use crate::state::{AirdropRound, Config, State, CLAIMS, CONFIG, STATE, CURRENT_ROUND};
+use crate::state::{AirdropRound, Config, State, CLAIMS, CONFIG, STATE, CURRENT_ROUND, query_registry};
 
 /// Verify merkle proof using SHA256 and sorted pair hashing
 fn verify_merkle_proof(
@@ -61,16 +64,13 @@ pub fn instantiate(
 ) -> StdResult<Response> {
     let owner = deps.api.addr_validate(&msg.owner)?;
     let backend_wallet = deps.api.addr_validate(&msg.backend_wallet)?;
-    let erth_token_contract = deps.api.addr_validate(&msg.erth_token_contract)?;
-    let allocation_contract = deps.api.addr_validate(&msg.allocation_contract)?;
+    let registry_contract = deps.api.addr_validate(&msg.registry_contract)?;
 
     let config = Config {
         owner,
         backend_wallet,
-        erth_token_contract,
-        erth_token_hash: msg.erth_token_hash.clone(),
-        allocation_contract,
-        allocation_hash: msg.allocation_hash.clone(),
+        registry_contract,
+        registry_hash: msg.registry_hash,
     };
     CONFIG.save(deps.storage, &config)?;
 
@@ -117,8 +117,12 @@ fn receive_dispatch(
 ) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
 
-    // Verify it's from ERTH token contract
-    if info.sender != config.erth_token_contract {
+    // Query registry for erth_token to verify sender
+    let deps_ref = deps.as_ref();
+    let contracts = query_registry(&deps_ref, &config.registry_contract, &config.registry_hash, vec!["erth_token"])?;
+    let erth_token = &contracts[0];
+
+    if info.sender != erth_token.address {
         return Err(StdError::generic_err("Unauthorized: only ERTH token can send"));
     }
 
@@ -180,6 +184,12 @@ fn execute_claim(
     round.claimed_amount += claim_amount;
     CURRENT_ROUND.save(deps.storage, &round)?;
 
+    // Query registry for erth_token and staking contract
+    let deps_ref = deps.as_ref();
+    let contracts = query_registry(&deps_ref, &config.registry_contract, &config.registry_hash, vec!["erth_token", "staking"])?;
+    let erth_token = &contracts[0];
+    let staking = &contracts[1];
+
     // Send SNIP-20 transfer
     let send_msg = snip20::transfer_msg(
         info.sender.to_string(),
@@ -187,14 +197,14 @@ fn execute_claim(
         None,
         None,
         256,
-        config.erth_token_hash.clone(),
-        config.erth_token_contract.to_string(),
+        erth_token.code_hash.clone(),
+        erth_token.address.to_string(),
     )?;
 
-    // Claim allocation from allocation contract
+    // Claim allocation from staking contract
     let allocation_claim_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: config.allocation_contract.to_string(),
-        code_hash: config.allocation_hash.clone(),
+        contract_addr: staking.address.to_string(),
+        code_hash: staking.code_hash.clone(),
         msg: to_binary(&SendMsg::ClaimAllocation {
             allocation_id: 4,
         })?,
@@ -272,15 +282,43 @@ fn execute_reset_airdrop(
     state.pending_reward = Uint128::zero();
     STATE.save(deps.storage, &state)?;
 
-    // Old claims remain with their round_id key
-    // New round uses new round_id, so all addresses can claim again
-
     Ok(Response::new()
         .add_attribute("action", "reset_airdrop")
         .add_attribute("new_round_id", state.current_round_id.to_string())
         .add_attribute("merkle_root", merkle_root)
         .add_attribute("total_amount", new_total.to_string())
         .add_attribute("unclaimed_rollover", unclaimed.to_string()))
+}
+
+// Old config for migration
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct OldConfig {
+    pub owner: Addr,
+    pub backend_wallet: Addr,
+    pub erth_token_contract: Addr,
+    pub erth_token_hash: String,
+    pub allocation_contract: Addr,
+    pub allocation_hash: String,
+}
+
+#[entry_point]
+pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> StdResult<Response> {
+    let old_config_storage: Item<OldConfig> = Item::new(b"config");
+    let old_config = old_config_storage.load(deps.storage)?;
+
+    let registry_addr = deps.api.addr_validate(&msg.registry_contract)?;
+
+    let new_config = Config {
+        owner: old_config.owner,
+        backend_wallet: old_config.backend_wallet,
+        registry_contract: registry_addr,
+        registry_hash: msg.registry_hash,
+    };
+    CONFIG.save(deps.storage, &new_config)?;
+
+    Ok(Response::new()
+        .add_attribute("action", "migrate")
+        .add_attribute("status", "success"))
 }
 
 #[entry_point]

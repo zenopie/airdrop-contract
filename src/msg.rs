@@ -8,10 +8,8 @@ use crate::state::Config;
 pub struct InstantiateMsg {
     pub owner: String,
     pub backend_wallet: String,
-    pub erth_token_contract: String,
-    pub erth_token_hash: String,
-    pub allocation_contract: String,
-    pub allocation_hash: String,
+    pub registry_contract: String,
+    pub registry_hash: String,
 }
 
 /// Execute messages
@@ -88,4 +86,7 @@ pub struct HasClaimedResponse {
 
 /// Migration message
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct MigrateMsg {}
+pub struct MigrateMsg {
+    pub registry_contract: String,
+    pub registry_hash: String,
+}

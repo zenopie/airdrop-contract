@@ -1,16 +1,14 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use secret_toolkit::storage::{Item, Keymap};
-use cosmwasm_std::{Addr, Uint128};
+use cosmwasm_std::{Addr, Uint128, Deps, StdResult, to_binary, QueryRequest, WasmQuery};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: Addr,
     pub backend_wallet: Addr,
-    pub erth_token_contract: Addr,
-    pub erth_token_hash: String,
-    pub allocation_contract: Addr,
-    pub allocation_hash: String,
+    pub registry_contract: Addr,
+    pub registry_hash: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -36,3 +34,44 @@ pub const CURRENT_ROUND: Item<AirdropRound> = Item::new(b"current_round");
 
 // Claims storage with composite key (round_id, address)
 pub const CLAIMS: Keymap<(u64, Addr), String> = Keymap::new(b"claims");
+
+// Minimal registry types
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryQueryMsg {
+    GetContracts { names: Vec<String> },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ContractInfo {
+    pub address: Addr,
+    pub code_hash: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ContractResponse {
+    pub name: String,
+    pub info: ContractInfo,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AllContractsResponse {
+    pub contracts: Vec<ContractResponse>,
+}
+
+pub fn query_registry(
+    deps: &Deps,
+    registry_addr: &Addr,
+    registry_hash: &str,
+    names: Vec<&str>,
+) -> StdResult<Vec<ContractInfo>> {
+    let query_msg = RegistryQueryMsg::GetContracts {
+        names: names.iter().map(|n| n.to_string()).collect(),
+    };
+    let response: AllContractsResponse = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        contract_addr: registry_addr.to_string(),
+        code_hash: registry_hash.to_string(),
+        msg: to_binary(&query_msg)?,
+    }))?;
+    Ok(response.contracts.into_iter().map(|c| c.info).collect())
+}
