@@ -86,7 +86,11 @@ pub struct HasClaimedResponse {
 
 /// Migration message
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct MigrateMsg {
-    pub registry_contract: String,
-    pub registry_hash: String,
+#[serde(rename_all = "snake_case")]
+pub enum MigrateMsg {
+    Migrate {
+        registry_contract: String,
+        registry_hash: String,
+    },
+    Upgrade {},
 }

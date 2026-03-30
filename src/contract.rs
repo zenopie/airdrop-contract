@@ -303,22 +303,29 @@ pub struct OldConfig {
 
 #[entry_point]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> StdResult<Response> {
-    let old_config_storage: Item<OldConfig> = Item::new(b"config");
-    let old_config = old_config_storage.load(deps.storage)?;
+    match msg {
+        MigrateMsg::Migrate { registry_contract, registry_hash } => {
+            let old_config_storage: Item<OldConfig> = Item::new(b"config");
+            let old_config = old_config_storage.load(deps.storage)?;
 
-    let registry_addr = deps.api.addr_validate(&msg.registry_contract)?;
+            let registry_addr = deps.api.addr_validate(&registry_contract)?;
 
-    let new_config = Config {
-        owner: old_config.owner,
-        backend_wallet: old_config.backend_wallet,
-        registry_contract: registry_addr,
-        registry_hash: msg.registry_hash,
-    };
-    CONFIG.save(deps.storage, &new_config)?;
+            let new_config = Config {
+                owner: old_config.owner,
+                backend_wallet: old_config.backend_wallet,
+                registry_contract: registry_addr,
+                registry_hash,
+            };
+            CONFIG.save(deps.storage, &new_config)?;
 
-    Ok(Response::new()
-        .add_attribute("action", "migrate")
-        .add_attribute("status", "success"))
+            Ok(Response::new()
+                .add_attribute("action", "migrate")
+                .add_attribute("status", "success"))
+        }
+        MigrateMsg::Upgrade {} => {
+            Ok(Response::new().add_attribute("action", "upgrade"))
+        }
+    }
 }
 
 #[entry_point]
